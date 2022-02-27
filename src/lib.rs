@@ -1,4 +1,4 @@
-use std::{collections::HashMap, marker::PhantomData};
+use std::{marker::PhantomData};
 
 #[cfg(test)]
 mod tests {
@@ -9,35 +9,25 @@ mod tests {
     }
 }
 
-struct VDom {
-    tag: String,
-    attrs: HashMap<String, String>,
-    children: Vec<VDom>,
-}
-
-struct UI {
-    dom: VDom,
-}
-
-pub trait ImpureOperation<State> {
+pub trait Hook<State> {
     fn get_state(&self) -> State;
     fn call_effect(&mut self);
-    fn reform<Next,Func : Fn(State) -> Next>(self,func: Func) -> Reformed<State,Next,Func,Self> where Self: Sized {
+    fn reform<Next,Func : 'static + Fn(State) -> Next>(self,func: Func) -> Reformed<State,Next,Func,Self> where Self: Sized {
         todo!()
     }
-    fn merge<OS,OO: ImpureOperation<OS>,Next,Func: Fn(State,OS) -> Next>(self,other: OO,func: Func) -> Merged<State,OS,Next,Func,Self,OO> where Self: Sized {
+    fn merge<OS,OO: Hook<OS>,Next,Func: 'static + Fn(State,OS) -> Next>(self,other: OO,func: Func) -> Merged<State,OS,Next,Func,Self,OO> where Self: Sized {
         todo!()
     }
 }
 
-pub struct Merged<S1,S2,S3,Func: Fn(S1,S2) -> S3, Op1: ImpureOperation<S1>,Op2: ImpureOperation<S2>> {
+pub struct Merged<S1,S2,S3,Func: Fn(S1,S2) -> S3, Op1: Hook<S1>,Op2: Hook<S2>> {
     op1: Op1,
     op2: Op2,
     func: Func,
     __marker: PhantomData<(S1,S2)>,
 }
 
-impl <S1,S2,S3,Func: Fn(S1,S2) -> S3, Op1: ImpureOperation<S1>,Op2: ImpureOperation<S2>> ImpureOperation<S3> for Merged<S1,S2,S3,Func,Op1,Op2> {
+impl <S1,S2,S3,Func: Fn(S1,S2) -> S3, Op1: Hook<S1>,Op2: Hook<S2>> Hook<S3> for Merged<S1,S2,S3,Func,Op1,Op2> {
     fn get_state(&self) -> S3 {
         (self.func)(self.op1.get_state(),self.op2.get_state())
     }
@@ -47,13 +37,13 @@ impl <S1,S2,S3,Func: Fn(S1,S2) -> S3, Op1: ImpureOperation<S1>,Op2: ImpureOperat
     }
 }
 
-pub struct Reformed<P,C,Func : Fn(P) -> C,PrevOp:ImpureOperation<P>> {
+pub struct Reformed<P,C,Func : Fn(P) -> C,PrevOp:Hook<P>> {
     op: PrevOp,
     func: Func,
     __mark: PhantomData<(P,C)>,
 }
 
-impl <P,C,Func : Fn(P) -> C,PrevOp:ImpureOperation<P>> ImpureOperation<C> for Reformed<P,C,Func,PrevOp> {
+impl <P,C,Func : Fn(P) -> C,PrevOp:Hook<P>> Hook<C> for Reformed<P,C,Func,PrevOp> {
     fn get_state(&self) -> C {
         todo!()
     }
@@ -82,7 +72,7 @@ impl <S,M,U: Fn(S,M)  -> S> State<S,M,U> {
 
 type StateWithUpdate<S> = (S,Box<dyn FnMut(S)>);
 
-impl <S,M,U: Fn(S,M) -> S>ImpureOperation<StateWithUpdate<S>> for State<S,M,U> {
+impl <S,M,U: Fn(S,M) -> S>Hook<StateWithUpdate<S>> for State<S,M,U> {
     fn get_state(&self) -> (S, Box<(dyn FnMut(S))>) {
         todo!()
     }
@@ -93,7 +83,7 @@ impl <S,M,U: Fn(S,M) -> S>ImpureOperation<StateWithUpdate<S>> for State<S,M,U> {
 
 }
 
-pub struct Effect<S, Op: ImpureOperation<S>,C: FnMut(S)> {
+pub struct Effect<S, Op: Hook<S>,C: FnMut(S)> {
     callback: C,
     op: Op,
     __mark: PhantomData<S>,
@@ -103,7 +93,7 @@ struct Empty {
 
 }
 
-impl ImpureOperation<()> for Empty {
+impl Hook<()> for Empty {
     fn get_state(&self) -> () {
         todo!()
     }
@@ -114,7 +104,7 @@ impl ImpureOperation<()> for Empty {
 }
 
 struct OperationTodo;
-impl<T> ImpureOperation<T> for OperationTodo {
+impl<T> Hook<T> for OperationTodo {
     fn get_state(&self) -> T {
         todo!()
     }
@@ -125,7 +115,7 @@ impl<T> ImpureOperation<T> for OperationTodo {
 }
 
 
-impl <C: FnMut(())>Effect<(),Empty,C> {
+impl <C: 'static + FnMut(())>Effect<(),Empty,C> {
     pub fn new(callback: C) -> Self {
         Self {
             callback,
@@ -135,7 +125,7 @@ impl <C: FnMut(())>Effect<(),Empty,C> {
     }
 }
 
-impl <S, Op: ImpureOperation<S>,C:FnMut(S)>Effect<S,Op,C> {
+impl <S, Op: Hook<S>,C:'static + FnMut(S)>Effect<S,Op,C> {
     pub fn with(callback: C,op: Op) -> Effect<S,Op,C> {
         Effect {
             callback,
@@ -145,7 +135,7 @@ impl <S, Op: ImpureOperation<S>,C:FnMut(S)>Effect<S,Op,C> {
     }
 }
 
-impl <S, Op: ImpureOperation<S>,C:FnMut(S)>ImpureOperation<S> for Effect<S,Op,C> {
+impl <S, Op: Hook<S>,C:FnMut(S)>Hook<S> for Effect<S,Op,C> {
     fn get_state(&self) -> S {
         todo!()
     }
@@ -155,41 +145,38 @@ impl <S, Op: ImpureOperation<S>,C:FnMut(S)>ImpureOperation<S> for Effect<S,Op,C>
     }
 }
 
-pub struct SampleContainerProps {
-    pub name: String,
+mod sample {
+    use crate::{Hook, State, Effect};
+
+    fn set_interval_mock(callback: Box<dyn FnMut()>, delay: u32) {
+        todo!()
+    }
+    
+    pub fn sample_effect() -> impl Hook<i32> {
+        let state = State::new(0, |cur,plus: i32| { cur + plus });
+        let effect = Effect::with(|(_,mut update)| {
+            set_interval_mock(Box::new(move || {
+                update(1);
+            }), 1000);
+        }, state);
+        effect.reform(|(state,_)| state)
+    }
+    
+    pub fn sample_effect2() -> impl Hook<i32> {
+        let state = State::new(0, |cur,plus: i32| { cur + plus });
+        let effect = Effect::with(|(_,mut update)| {
+            set_interval_mock(Box::new(move || {
+                update(1);
+            }), 100);
+        }, state);
+        effect.reform(|(state,_)| state)
+    }
+    
+    pub fn sample_effect_merge() -> impl Hook<(i32,i32)> {
+        let hook1 = sample_effect();
+        let hook2 = sample_effect2();
+        hook1.merge(hook2, |s1,s2| (s1,s2))
+    }
 }
 
-fn set_interval_mock(callback: Box<dyn FnMut()>, delay: u32) {
-    todo!()
-}
-
-pub fn sample_effect() -> impl ImpureOperation<i32> {
-    let state = State::new(0, |cur,plus: i32| { cur + plus });
-    let effect = Effect::with(|(_,mut update)| {
-        set_interval_mock(Box::new(move || {
-            update(1);
-        }), 1000);
-    }, state);
-    effect.reform(|(state,_)| state)
-}
-
-pub fn sample_effect2() -> impl ImpureOperation<i32> {
-    let state = State::new(0, |cur,plus: i32| { cur + plus });
-    let effect = Effect::with(|(_,mut update)| {
-        set_interval_mock(Box::new(move || {
-            update(1);
-        }), 100);
-    }, state);
-    effect.reform(|(state,_)| state)
-}
-
-pub fn sample_effect_merge(props: SampleContainerProps) -> impl ImpureOperation<i32> {
-    let op1 = sample_effect();
-    let op2 = sample_effect2();
-    op1.merge(op2, |s1,s2| s1 + s2)
-}
-
-pub fn connect<R: Fn() -> UI>(render: R){
-
-}
 
